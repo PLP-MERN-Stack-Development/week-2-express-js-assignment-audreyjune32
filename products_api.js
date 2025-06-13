@@ -1,143 +1,173 @@
-// server.js - Starter Express server for Week 2 assignment
-
-// Import required modules
+// server.js
 const express = require("express");
 const bodyParser = require("body-parser");
-const { v4: uuidv4 } = require("uuid");
+const productRoutes = require("./routes/products");
+const logger = require("./middleware/logger");
+const auth = require("./middleware/auth");
+const errorHandler = require("./middleware/errorHandler");
 
-// Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware setup
+app.use(logger);
+app.use(auth);
 app.use(bodyParser.json());
 
-// Sample in-memory products database
-let products = [
-  {
-    id: "1",
-    name: "Laptop",
-    description: "High-performance laptop with 16GB RAM",
-    price: 1200,
-    category: "electronics",
-    inStock: true,
-  },
-  {
-    id: "2",
-    name: "Smartphone",
-    description: "Latest model with 128GB storage",
-    price: 800,
-    category: "electronics",
-    inStock: true,
-  },
-  {
-    id: "3",
-    name: "Coffee Maker",
-    description: "Programmable coffee maker with timer",
-    price: 50,
-    category: "kitchen",
-    inStock: false,
-  },
-];
+app.use("/api/products", productRoutes);
+app.use(errorHandler);
 
-// Root route
-app.get("/", (req, res) => {
-  res.send(
-    "Welcome to the Product API! Go to /api/products to see all products."
-  );
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
 
-// TODO: Implement the following routes:
-// GET /api/products - Get all products
-// GET /api/products - Get all products
-app.get("/api/products", (req, res) => {
-  res.json(products);
-});
+// routes/products.js
+//const express = require('express');
+const router = express.Router();
+const {
+  getProducts,
+  getProductById,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  searchProducts,
+  getProductStats,
+} = require("../controllers/productsController");
+const validateProduct = require("../middleware/validateProduct");
 
-// GET /api/products/:id - Get a specific product
-app.get("/api/products/:id", (req, res) => {
+router.get("/", getProducts);
+router.get("/search", searchProducts);
+router.get("/stats", getProductStats);
+router.get("/:id", getProductById);
+router.post("/", validateProduct, createProduct);
+router.put("/:id", validateProduct, updateProduct);
+router.delete("/:id", deleteProduct);
+
+module.exports = router;
+
+// controllers/productsController.js
+const { NotFoundError, ValidationError } = require("../utils/customErrors");
+
+let products = [];
+
+exports.getProducts = (req, res) => {
+  const { category, page = 1, limit = 10 } = req.query;
+  let results = [...products];
+
+  if (category) {
+    results = results.filter((p) => p.category === category);
+  }
+
+  const start = (page - 1) * limit;
+  const paginated = results.slice(start, start + parseInt(limit));
+
+  res.json(paginated);
+};
+
+exports.getProductById = (req, res, next) => {
   const product = products.find((p) => p.id === req.params.id);
-  if (!product) {
-    return res.status(404).json({ error: "Product not found" });
-  }
+  if (!product) return next(new NotFoundError("Product not found"));
   res.json(product);
-});
+};
 
-// POST /api/products - Create a new product
-app.post("/api/products", (req, res) => {
+exports.createProduct = (req, res) => {
   const { name, description, price, category, inStock } = req.body;
-
-  if (!name || !description || price == null || !category || inStock == null) {
-    return res.status(400).json({ error: "All fields are required" });
-  }
-
-  const newProduct = {
-    id: uuidv4(),
+  const product = {
+    id: "1",
     name,
     description,
     price,
     category,
     inStock,
   };
-  products.push(newProduct);
-  res.status(201).json({ message: "Product created", product: newProduct });
-});
+  products.push(product);
+  res.status(201).json(product);
+};
 
-// PUT /api/products/:id - Update a product
-app.put("/api/products/:id", (req, res) => {
+exports.updateProduct = (req, res, next) => {
   const index = products.findIndex((p) => p.id === req.params.id);
-  if (index === -1) {
-    return res.status(404).json({ error: "Product not found" });
-  }
+  if (index === -1) return next(new NotFoundError("Product not found"));
 
-  const updatedProduct = { ...products[index], ...req.body };
-  products[index] = updatedProduct;
+  products[index] = { ...products[index], ...req.body };
+  res.json(products[index]);
+};
 
-  res.json({ message: "Product updated", product: updatedProduct });
-});
-
-// DELETE /api/products/:id - Delete a product
-app.delete("/api/products/:id", (req, res) => {
+exports.deleteProduct = (req, res, next) => {
   const index = products.findIndex((p) => p.id === req.params.id);
-  if (index === -1) {
-    return res.status(404).json({ error: "Product not found" });
-  }
+  if (index === -1) return next(new NotFoundError("Product not found"));
 
   const deleted = products.splice(index, 1);
-  res.json({ message: "Product deleted", product: deleted[0] });
-});
+  res.json(deleted[0]);
+};
 
-// Example route implementation for GET /api/products
-app.get("/api/products", (req, res) => {
-  res.json(products);
-});
+exports.searchProducts = (req, res) => {
+  const { name } = req.query;
+  const result = products.filter((p) =>
+    p.name.toLowerCase().includes(name.toLowerCase())
+  );
+  res.json(result);
+};
 
-// TODO: Implement custom middleware for:
-// - Request logging
-app.use((req, res, next) => {
+exports.getProductStats = (req, res) => {
+  const stats = {};
+  for (const product of products) {
+    stats[product.category] = (stats[product.category] || 0) + 1;
+  }
+  res.json(stats);
+};
+
+// middleware/logger.js
+module.exports = (req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
-});
+};
 
-// - Authentication
-app.use((req, res, next) => {
+// middleware/auth.js
+module.exports = (req, res, next) => {
   const apiKey = req.headers["x-api-key"];
   if (!apiKey || apiKey !== "my-secret-key") {
     return res.status(401).json({ error: "Unauthorized" });
   }
   next();
-});
+};
 
-// - Error handling
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: "Something went wrong" });
-});
+// middleware/validateProduct.js
+const { ValidationError } = require("../utils/customErrors");
 
-// Start the server
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-});
+module.exports = (req, res, next) => {
+  const { name, description, price, category, inStock } = req.body;
+  if (!name || !description || price == null || !category || inStock == null) {
+    return next(new ValidationError("All fields are required"));
+  }
+  if (typeof price !== "number" || typeof inStock !== "boolean") {
+    return next(new ValidationError("Invalid data types"));
+  }
+  next();
+};
 
-// Export the app for testing purposes
-module.exports = app;
+// middleware/errorHandler.js
+module.exports = (err, req, res, next) => {
+  console.error(err);
+  res.status(err.statusCode || 500).json({ error: err.message });
+};
+
+// utils/customErrors.js
+class NotFoundError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "NotFoundError";
+    this.statusCode = 404;
+  }
+}
+
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ValidationError";
+    this.statusCode = 400;
+  }
+}
+
+module.exports = {
+  NotFoundError,
+  ValidationError,
+};
